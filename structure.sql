@@ -53,6 +53,14 @@ CREATE VIEW data_view AS (
   SELECT data.*, null::INT AS lock_id FROM data
 );
 
+CREATE VIEW active_lock AS (
+  SELECT * FROM lock WHERE finished_at IS NULL AND started_at > (NOW() - interval '15 minutes')
+);
+
+CREATE VIEW active_row_lock AS (
+  SELECT * FROM lock_row WHERE lock_id IN (SELECT id FROM active_lock)
+);
+
 
 -----------------------
 -- TRIGGER FUNCTIONS --
@@ -93,7 +101,7 @@ DECLARE
 BEGIN
 
   -- Checks first
-  IF ((SELECT COUNT(*) FROM lock WHERE id = NEW.lock_id AND finished_at IS NULL AND started_at > (NOW() - interval '15 minutes')) = 0) THEN
+  IF ((SELECT COUNT(*) FROM active_lock WHERE id = NEW.lock_id) = 0) THEN
     RAISE EXCEPTION 'Lock % is already finished or its lifetime ended', NEW.lock_id;
   END IF;
   IF ((SELECT COUNT(*) FROM lock_row WHERE lock_id = NEW.lock_id AND data_id = NEW.id) = 0) THEN
@@ -117,6 +125,21 @@ BEGIN
 END
 $end$ LANGUAGE plpgsql;
 
+CREATE FUNCTION lock_row_no_parralel() RETURNS trigger AS $end$
+BEGIN
+  IF ((SELECT COUNT(*) FROM active_row_lock WHERE data_id = NEW.data_id) > 0) THEN
+    RAISE EXCEPTION 'Row % is already locked!', NEW.data_id;
+  END IF;
+  RETURN NEW;
+END
+$end$ LANGUAGE plpgsql;
+
+CREATE FUNCTION util_blocking_trigger() RETURNS trigger AS $end$
+BEGIN
+  RAISE EXCEPTION 'Operation blocked!';
+END
+$end$ LANGUAGE plpgsql;
+
 --------------
 -- TRIGGERS --
 --------------
@@ -133,3 +156,15 @@ CREATE TRIGGER data_view_update
   FOR EACH ROW
   -- WHEN (OLD.* IS DISTINCT FROM NEW.*) -- only when something changed
   EXECUTE PROCEDURE data_view_update_procedure();
+
+
+-- Trigger that prevents from blocking the same row in two ongoing transactions
+CREATE TRIGGER lock_row_no_parralel_trigger
+  BEFORE INSERT ON lock_row
+  FOR EACH ROW
+  EXECUTE PROCEDURE lock_row_no_parralel();
+
+-- Lock row - block update.
+CREATE TRIGGER lock_row_block_update
+  BEFORE UPDATE ON lock_row
+  EXECUTE PROCEDURE util_blocking_trigger();

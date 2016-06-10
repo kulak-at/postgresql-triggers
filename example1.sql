@@ -41,8 +41,44 @@ EXCEPTION WHEN others THEN
   RAISE NOTICE 'Worked - threw error:  %', SQLERRM;
 END;
 
+  -- INSERT INTO lock(id) VALUES(DEFAULT) RETURNING id INTO _lock1_id;
+  -- INSERT INTO lock(id) VALUES(DEFAULT) RETURNING id INTO _lock2_id;
+  -- RAISE NOTICE 'Created locks: %,%', _lock1_id, _lock2_id;
+
+  -- INSERT INTO lock_row(lock_id, data_id) VALUES(_lock1_id, row_var_id);
+  -- RAISE NOTICE 'It should work still.';
+  -- INSERT INTO lock_row(lock_id, data_id) VALUES(_lock2_id, row_var_id); -- it should throw an error
+
+-- EXCEPTION WHEN OTHERS THEN
+--   RAISE NOTICE 'Workder - threw error: %', SQLERRM;
 
 END $$;
+
+DO $x$
+DECLARE
+  _lock1_id INT;
+  _lock2_id INT;
+  _row_var_id INT;
+BEGIN
+  BEGIN
+
+    RAISE NOTICE '--- TEST 5: WE SHOULDNT BE ABLE TO LOCK ROW WHEN IT IS ALREADY LOCKED ---';
+    INSERT INTO lock(id) VALUES(DEFAULT) RETURNING id INTO _lock1_id;
+    INSERT INTO lock(id) VALUES(DEFAULT) RETURNING id INTO _lock2_id;
+    INSERT INTO data_view(value1,value2,lock_id) VALUES(10, 'abc', _lock1_id) RETURNING id INTO _row_var_id;
+
+    RAISE NOTICE 'Created locks: %, %', _lock1_id, _lock2_id;
+
+    RAISE NOTICE 'Created row: %', _row_var_id;
+
+    INSERT INTO lock_row(lock_id, data_id) VALUES(_lock1_id, _row_var_id);
+    INSERT INTO lock_row(lock_id, data_id) VALUES(_lock2_id, _row_var_id); -- it should throw an error
+    RAISE NOTICE 'SHOULDNT HAPPEN :(';
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'Worked: %', SQLERRM;
+  END;
+
+END $x$;
 
 COMMIT;
 
