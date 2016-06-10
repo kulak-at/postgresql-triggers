@@ -1,3 +1,5 @@
+CREATE EXTENSION hstore;
+
 ---------------
 -- STRUCTURE --
 ---------------
@@ -78,7 +80,7 @@ BEGIN
   inserted_data_history AS (
     INSERT INTO data_history (data_history_row_id, lock_id, created_at) SELECT id, NEW.lock_id, NOW() FROM inserted_data_history_row RETURNING *
   )
-  SELECT id FROM inserted_data_history INTO NEW.id;
+  SELECT id FROM inserted_data INTO NEW.id;
 
   RETURN NEW;
 END
@@ -89,6 +91,17 @@ CREATE FUNCTION data_view_update_procedure() RETURNS trigger AS $end$
 DECLARE
   var_id INT;
 BEGIN
+
+  -- Checks first
+  IF ((SELECT COUNT(*) FROM lock WHERE id = NEW.lock_id AND finished_at IS NULL AND started_at > (NOW() - interval '15 minutes')) = 0) THEN
+    RAISE EXCEPTION 'Lock % is already finished or its lifetime ended', NEW.lock_id;
+  END IF;
+  IF ((SELECT COUNT(*) FROM lock_row WHERE lock_id = NEW.lock_id AND data_id = NEW.id) = 0) THEN
+    RAISE EXCEPTION 'Lock % does not lock row %', NEW.lock_id, NEW.id;
+  END IF;
+
+
+
   WITH updated_data AS (
     UPDATE data SET (value1, value2) = (NEW.value1, NEW.value2)
     WHERE id = NEW.id RETURNING *
@@ -103,7 +116,6 @@ BEGIN
   RETURN NEW;
 END
 $end$ LANGUAGE plpgsql;
-
 
 --------------
 -- TRIGGERS --

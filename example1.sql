@@ -1,9 +1,13 @@
+
 START TRANSACTION;
 DO $$
 DECLARE
   lock_var_id INT;
   row_var_id INT;
 BEGIN
+
+RAISE NOTICE '--- TEST 1: REGULAR INSERT ---';
+-- Regular insert. Everything should work fine.
 INSERT INTO lock(id) VALUES (DEFAULT) RETURNING id INTO lock_var_id;
 
 RAISE NOTICE 'Lock Id: %', lock_var_id;
@@ -12,8 +16,34 @@ INSERT INTO data_view(value1,value2,lock_id) VALUES(10, 'abc', lock_var_id) RETU
 
 RAISE NOTICE 'Row Id: %', row_var_id;
 
+RAISE NOTICE '--- TEST 2: UPDATE WITHOUT LOCK WILL NOT WORK ---';
+BEGIN
+  -- It shouldn't work becouse there is no (lock_id, row_id) entity inside lock_rows
+  UPDATE data_view SET (value1, lock_id)=(15,lock_var_id) WHERE id = row_var_id;
+  RAISE NOTICE 'IT SHOULDNT HAPPEN';
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Worked - threw error: %', SQLERRM;
+END;
+
+RAISE NOTICE '--- TEST 3: UPDATE WITH LOCK WILL WORK---';
+INSERT INTO lock_row(lock_id, data_id) VALUES(lock_var_id, row_var_id);
+
+-- Now it should work.
 UPDATE data_view SET (value1, lock_id)=(15,lock_var_id) WHERE id = row_var_id;
+
+RAISE NOTICE '--- TEST 4: UPDATE WITH FINISHED LOCK WILL NOT WORK ---';
+UPDATE lock SET (finished_at) = (NOW()) WHERE id = lock_var_id;
+
+BEGIN
+  UPDATE data_view SET (value1, lock_id) = (20, lock_var_id) WHERE id = row_var_id;
+  RAISE NOTICE 'IT SHOULDNT HAPPEN';
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Worked - threw error:  %', SQLERRM;
+END;
+
 
 END $$;
 
 COMMIT;
+
+-- TODO: disable ability to create second lock at the same data.
